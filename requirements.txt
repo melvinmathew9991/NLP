@@ -6,6 +6,9 @@ nltk==3.9.4
 textblob==0.20.0
 wordcloud==1.9.6
 scikit-learn==1.9.0
+joblib==1.5.3
+transformers==5.13.0
+torch==2.12.1
 jupyter
 nbconvert
 ipykernel
