@@ -2,20 +2,28 @@
 
 Sentiment analysis of tweets about COVID-19 vaccines (Pfizer/BioNTech, AstraZeneca, Moderna, SputnikV), spanning December 2020 to November 2021.
 
+This README describes the project as it stands today. For how it got here — every bug found, every fix's measured impact, and why each structural decision was made — see [`PROJECT_HISTORY.md`](PROJECT_HISTORY.md).
+
 ## Folder structure
 
 ```
 .
 ├── README.md
+├── PROJECT_HISTORY.md
 ├── requirements.txt
 ├── .gitignore
 ├── data/
-│   └── vaccination_tweets.csv
+│   ├── vaccination_tweets.csv
+│   └── processed/
+│       └── labeled_tweets.csv        # cleaned+labeled handoff from notebook 1 to notebook 2
 ├── models/
 │   └── sentiment_pipeline.joblib   # persisted, ready to reload with joblib.load()
 └── notebooks/
-    └── Vaccination_Tweet_Sentimental_Analysis.ipynb
+    ├── 01_core_pipeline.ipynb        # Sections 1-13
+    └── 02_extended_analysis.ipynb    # Sections 14-18
 ```
+
+The project used to be one large notebook; it's now split in two by concern, following standard practice for notebooks that outgrow a single narrative. `01_core_pipeline.ipynb` handles cleaning, labeling, and the core models. It saves its cleaned+labeled data to `data/processed/labeled_tweets.csv` at the end. `02_extended_analysis.ipynb` loads that file instead of re-running the cleaning/labeling steps, deterministically reproduces the same train/test split and TF-IDF vectorization (same `random_state=42` and vectorizer settings), and then runs the extended analysis. Run `01_core_pipeline.ipynb` at least once before `02_extended_analysis.ipynb` — the second notebook depends on the first one's output file.
 
 ## Dataset
 
@@ -32,7 +40,7 @@ Sentiment analysis of tweets about COVID-19 vaccines (Pfizer/BioNTech, AstraZene
 
 Only `text` is used for the core modeling pipeline; other columns are dropped early on but brought back for the Extended Analysis (see below).
 
-## Core Pipeline (`notebooks/Vaccination_Tweet_Sentimental_Analysis.ipynb`, Sections 1-13)
+## Core Pipeline (`notebooks/01_core_pipeline.ipynb`, Sections 1-13)
 
 1. **Load & inspect** — read CSV, check shape/nulls/dtypes.
 2. **Reduce to text** — drop all metadata columns.
@@ -47,7 +55,7 @@ Only `text` is used for the core modeling pipeline; other columns are dropped ea
 
 The notebook has a markdown explanation before every step — read it directly for the full reasoning behind each choice.
 
-## Extended Analysis (Sections 14-18)
+## Extended Analysis (`notebooks/02_extended_analysis.ipynb`, Sections 14-18)
 
 Goes beyond the core pipeline using data dropped in Step 2 above (`hashtags`, `date`, `retweets`, `favorites`, `user_verified`):
 
@@ -128,14 +136,17 @@ pip install -r requirements.txt
 python -c "import nltk; [nltk.download(p) for p in ('punkt','punkt_tab','stopwords','wordnet','omw-1.4','vader_lexicon')]"
 ```
 
-## Running the notebook
+## Running the notebooks
+
+Run them in order — the second depends on the first's output:
 
 ```bash
 cd notebooks
-jupyter nbconvert --to notebook --execute --inplace Vaccination_Tweet_Sentimental_Analysis.ipynb
+jupyter nbconvert --to notebook --execute --inplace 01_core_pipeline.ipynb
+jupyter nbconvert --to notebook --execute --inplace 02_extended_analysis.ipynb
 ```
 
-The transformer-based label comparison (Section 16) downloads a ~500MB model from Hugging Face on first run and takes a few minutes to run inference on its 2,500-tweet sample; subsequent runs reuse the cached model weights.
+The transformer-based label comparison (Section 16, in `02_extended_analysis.ipynb`) downloads a ~500MB model from Hugging Face on first run and takes a few minutes to run inference on its 2,500-tweet sample; subsequent runs reuse the cached model weights.
 
 ## Reusing the saved model
 
@@ -145,4 +156,4 @@ pipeline = joblib.load('models/sentiment_pipeline.joblib')
 pipeline.predict(["vaccine side effect terrible", "grateful got shot today"])
 ```
 
-Note: the saved pipeline expects text already cleaned the same way as training (lowercased, URLs/mentions stripped, lemmatized — see Section 3's `data_processing()` and Section 4's `lemmatizing()`). It does not include that preprocessing step itself, so raw uncleaned tweets should be passed through those functions first.
+Note: the saved pipeline expects text already cleaned the same way as training (lowercased, URLs/mentions stripped, lemmatized — see `01_core_pipeline.ipynb` Section 3's `data_processing()` and Section 4's `lemmatizing()`). It does not include that preprocessing step itself, so raw uncleaned tweets should be passed through those functions first.
