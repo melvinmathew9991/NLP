@@ -39,8 +39,8 @@ Only `text` is used for modeling; all other columns are dropped early in the pip
 5. **Lemmatize** — reduce words to root form (e.g. `folks` → `folk`, `years` → `year`).
 6. **Label sentiment** — polarity score via TextBlob, bucketed into `Negative` (<0), `Neutral` (=0), `Positive` (>0). These labels are a heuristic, not human annotation.
 7. **EDA** — sentiment distribution (count/pie chart), word clouds per sentiment class.
-8. **Vectorize** — TF-IDF over unigrams + bigrams (~76k features).
-9. **Train/test split** — 80/20.
+8. **Train/test split** — 80/20, done on the raw cleaned text *before* vectorizing (see below).
+9. **Vectorize** — TF-IDF over unigrams + bigrams, fit on the training text only (~58k features).
 10. **Model & tune** — Logistic Regression and LinearSVC, both trained with `class_weight='balanced'` (to counter the Neutral-class majority) and hyperparameter-tuned via `GridSearchCV` scored on macro-F1 rather than accuracy, so the search doesn't undo the class-imbalance handling by optimizing for the majority class.
 
 The notebook itself now has a markdown explanation before every step — read it directly for the full reasoning behind each choice.
@@ -49,19 +49,24 @@ The notebook itself now has a markdown explanation before every step — read it
 
 | Model | Accuracy | Negative recall | Neutral recall | Positive recall |
 |---|---|---|---|---|
-| Logistic Regression (tuned, `C=10`) | 83.7% | **42%** | 96% | 81% |
-| LinearSVC (tuned, `C=10`) | **85.0%** | 38% | 97% | 84% |
+| Logistic Regression (tuned, `C=10`) | 85.3% | 51% | 94% | 85% |
+| LinearSVC (tuned, `C=10`) | **86.9%** | **51%** | 95% | 87% |
 
-Tuned LinearSVC has the highest overall accuracy; tuned Logistic Regression actually catches more true Negatives. Which one is "best" depends on whether overall accuracy or minority-class recall matters more for your use case.
+Tuned LinearSVC is the best overall model — highest accuracy and Positive recall, tied with tuned Logistic Regression on Negative recall.
 
-**Effect of fixing the negation/mention bugs** (see Known limitations below): compared to the same pipeline *before* those fixes, Negative recall rose from 39%→42% (LR) and 34%→38% (SVC), at a cost of roughly half a point of overall accuracy — a real, measurable, but modest improvement.
+**Effect of fixing three real bugs**, in order of actual impact:
+
+1. **TF-IDF was fit on the full dataset before the train/test split** — a genuine data-leakage bug (test-set word statistics leaked into the vocabulary/IDF weights used for training). Fixing it — splitting the raw text first, then fitting TF-IDF on training text only — was the biggest single improvement: **Negative recall jumped from ~38-42% to 51%** on both models, and accuracy rose ~2 points. Counterintuitively, fixing leakage usually *lowers* reported performance; here it improved it, likely because the smaller training-only vocabulary (58K features vs. the earlier 76K) generalizes better than one partly shaped around test-set-specific rare terms.
+2. **Stopword removal was deleting negation** (`not`/`no`/`nor` are NLTK stopwords), flipping polarity on negated tweets before sentiment scoring (verified: `"this vaccine is not safe"` scored -0.25, but after stopword-stripping became `"vaccine safe"` scoring +0.50).
+3. **The `@mention`-stripping regex was malformed** and never matched real mentions, letting usernames leak into the TF-IDF vocabulary as noise.
+
+All three are fixed in the current notebook.
 
 ## Known limitations
 
-- **Two real bugs existed in text cleaning and are now fixed**: (1) NLTK's stopword list removes `not`/`no`/`nor`, which was deleting negation before sentiment scoring and flipping polarity on negated tweets (verified: `"this vaccine is not safe"` scored -0.25, but after stopword-stripping the same text became `"vaccine safe"` scoring +0.50); (2) the `@mention`-stripping regex was malformed and never matched real mentions, letting usernames leak into the TF-IDF vocabulary as noise. Both are fixed in the current notebook — see the Results section above for the measured impact.
 - **Labels are heuristic, not ground truth.** Sentiment comes from TextBlob polarity applied to the cleaned text, not human annotation — accuracy reflects agreement with TextBlob, not real-world sentiment.
-- **Negative class is still the hardest to predict**, even after the fixes. It's both the smallest class (~11% of test set) and the noisiest label (TextBlob is weak on sarcasm/negation/political phrasing common in these tweets). The bug fixes helped, but `class_weight='balanced'` and macro-F1-scored tuning alone can't close the gap further — the remaining bottleneck is the label/feature signal, not the classifier's weighting.
-- Next steps to actually improve minority-class performance further: swap TextBlob for VADER (built for social-media text), bring back `date`/`retweets`/`favorites`/`user_verified` for richer EDA, or hand-label a validation subset to check whether TextBlob's labels are the real limiting factor.
+- **Negative class is still the hardest to predict**, even after all three fixes. It's both the smallest class (~11% of test set) and the noisiest label (TextBlob is weak on sarcasm/implicit criticism that doesn't use obviously negative words). No amount of further `C`-tuning or class-weighting can teach a linear model a signal that isn't reliably present in the labels it's trained to reproduce.
+- Next steps to improve minority-class performance further: swap TextBlob for VADER (built for social-media text), bring back `date`/`retweets`/`favorites`/`user_verified` for richer EDA, add cross-validation and an `sklearn.Pipeline` (harder to accidentally leak again), or hand-label a validation subset to check whether TextBlob's labels are the real limiting factor.
 
 ## Environment
 
